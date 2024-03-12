@@ -12,10 +12,9 @@ import comfy.model_management
 import comfy.model_base
 import comfy.supported_models
 import comfy.supported_models_base
-from comfy.model_downloader import get_or_download
-from comfy.model_downloader_types import HuggingFile
+from comfy.model_downloader import get_or_download, KNOWN_CHECKPOINTS
+from comfy.model_downloader_types import HuggingFile, CivitFile
 from comfy.model_patcher import ModelPatcher
-from comfy.cmd.folder_paths import get_folder_paths
 from comfy.utils import load_torch_file
 from comfy_extras.nodes.nodes_compositing import JoinImageWithAlpha
 from comfy.conds import CONDRegular
@@ -31,6 +30,9 @@ load_layer_model_state_dict = load_torch_file
 
 
 # ------------ Start patching ComfyUI ------------
+# this references checkpoints for its example workflows that should be added here
+KNOWN_CHECKPOINTS.append(CivitFile(133005, 357609, filename="juggernautXL_v8Rundiffusion.safetensors"))
+
 def calculate_weight_adjust_channel(func):
     """Patches ComfyUI's LoRA weight application to accept multi-channel inputs."""
 
