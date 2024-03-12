@@ -62,38 +62,38 @@ class LatentTransparencyOffsetEncoder(torch.nn.Module):
 class UNet1024(ModelMixin, ConfigMixin):
     @register_to_config
     def __init__(
-        self,
-        in_channels: int = 3,
-        out_channels: int = 3,
-        down_block_types: Tuple[str] = (
-            "DownBlock2D",
-            "DownBlock2D",
-            "DownBlock2D",
-            "DownBlock2D",
-            "AttnDownBlock2D",
-            "AttnDownBlock2D",
-            "AttnDownBlock2D",
-        ),
-        up_block_types: Tuple[str] = (
-            "AttnUpBlock2D",
-            "AttnUpBlock2D",
-            "AttnUpBlock2D",
-            "UpBlock2D",
-            "UpBlock2D",
-            "UpBlock2D",
-            "UpBlock2D",
-        ),
-        block_out_channels: Tuple[int] = (32, 32, 64, 128, 256, 512, 512),
-        layers_per_block: int = 2,
-        mid_block_scale_factor: float = 1,
-        downsample_padding: int = 1,
-        downsample_type: str = "conv",
-        upsample_type: str = "conv",
-        dropout: float = 0.0,
-        act_fn: str = "silu",
-        attention_head_dim: Optional[int] = 8,
-        norm_num_groups: int = 4,
-        norm_eps: float = 1e-5,
+            self,
+            in_channels: int = 3,
+            out_channels: int = 3,
+            down_block_types: Tuple[str] = (
+                    "DownBlock2D",
+                    "DownBlock2D",
+                    "DownBlock2D",
+                    "DownBlock2D",
+                    "AttnDownBlock2D",
+                    "AttnDownBlock2D",
+                    "AttnDownBlock2D",
+            ),
+            up_block_types: Tuple[str] = (
+                    "AttnUpBlock2D",
+                    "AttnUpBlock2D",
+                    "AttnUpBlock2D",
+                    "UpBlock2D",
+                    "UpBlock2D",
+                    "UpBlock2D",
+                    "UpBlock2D",
+            ),
+            block_out_channels: Tuple[int] = (32, 32, 64, 128, 256, 512, 512),
+            layers_per_block: int = 2,
+            mid_block_scale_factor: float = 1,
+            downsample_padding: int = 1,
+            downsample_type: str = "conv",
+            upsample_type: str = "conv",
+            dropout: float = 0.0,
+            act_fn: str = "silu",
+            attention_head_dim: Optional[int] = 8,
+            norm_num_groups: int = 4,
+            norm_eps: float = 1e-5,
     ):
         super().__init__()
 
@@ -217,10 +217,10 @@ class UNet1024(ModelMixin, ConfigMixin):
         sample = self.mid_block(sample, emb)
 
         for upsample_block in self.up_blocks:
-            res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
+            res_samples = down_block_res_samples[-len(upsample_block.resnets):]
             down_block_res_samples = down_block_res_samples[
-                : -len(upsample_block.resnets)
-            ]
+                                     : -len(upsample_block.resnets)
+                                     ]
             sample = upsample_block(sample, res_samples, emb)
 
         sample = self.conv_norm_out(sample)
@@ -301,7 +301,7 @@ class TransparentVAEDecoder:
 
     @torch.no_grad()
     def decode_pixel(
-        self, pixel: torch.TensorType, latent: torch.TensorType
+            self, pixel: torch.TensorType, latent: torch.TensorType
     ) -> torch.TensorType:
         # pixel.shape = [B, C=3, H, W]
         assert pixel.shape[1] == 3

@@ -6,23 +6,24 @@ import copy
 from typing import Optional, List
 from dataclasses import dataclass
 
-import folder_paths
+from comfy import model_management
+from comfy.cmd import folder_paths
 import comfy.model_management
 import comfy.model_base
 import comfy.supported_models
 import comfy.supported_models_base
+from comfy.model_downloader import HuggingFile, get_or_download
 from comfy.model_patcher import ModelPatcher
-from folder_paths import get_folder_paths
+from comfy.cmd.folder_paths import get_folder_paths
 from comfy.utils import load_torch_file
-from comfy_extras.nodes_compositing import JoinImageWithAlpha
+from comfy_extras.nodes.nodes_compositing import JoinImageWithAlpha
 from comfy.conds import CONDRegular
-from .lib_layerdiffusion.utils import (
-    load_file_from_url,
-    to_lora_patch_dict,
-)
+from .lib_layerdiffusion.utils import to_lora_patch_dict
 from .lib_layerdiffusion.models import TransparentVAEDecoder
 from .lib_layerdiffusion.attention_sharing import AttentionSharingPatcher
 from .lib_layerdiffusion.enums import StableDiffusionVersion
+
+FOLDER_PATH = "layer_model"
 
 if "layer_model" in folder_paths.folder_names_and_paths:
     layer_model_root = get_folder_paths("layer_model")[0]
@@ -37,7 +38,7 @@ def calculate_weight_adjust_channel(func):
 
     @functools.wraps(func)
     def calculate_weight(
-        self: ModelPatcher, patches, weight: torch.Tensor, key: str
+            self: ModelPatcher, patches, weight: torch.Tensor, key: str
     ) -> torch.Tensor:
         weight = func(self, patches, weight, key)
 
@@ -58,11 +59,11 @@ def calculate_weight_adjust_channel(func):
             if patch_type == "diff":
                 w1 = v[0]
                 if all(
-                    (
-                        alpha != 0.0,
-                        w1.shape != weight.shape,
-                        w1.ndim == weight.ndim == 4,
-                    )
+                        (
+                                alpha != 0.0,
+                                w1.shape != weight.shape,
+                                w1.ndim == weight.ndim == 4,
+                        )
                 ):
                     new_shape = [max(n, m) for n, m in zip(weight.shape, w1.shape)]
                     print(
@@ -73,16 +74,16 @@ def calculate_weight_adjust_channel(func):
                     )
                     new_weight = torch.zeros(size=new_shape).to(weight)
                     new_weight[
-                        : weight.shape[0],
-                        : weight.shape[1],
-                        : weight.shape[2],
-                        : weight.shape[3],
+                    : weight.shape[0],
+                    : weight.shape[1],
+                    : weight.shape[2],
+                    : weight.shape[3],
                     ] = weight
                     new_weight[
-                        : new_diff.shape[0],
-                        : new_diff.shape[1],
-                        : new_diff.shape[2],
-                        : new_diff.shape[3],
+                    : new_diff.shape[0],
+                    : new_diff.shape[1],
+                    : new_diff.shape[2],
+                    : new_diff.shape[3],
                     ] += new_diff
                     new_weight = new_weight.contiguous().clone()
                     weight = new_weight
@@ -96,6 +97,11 @@ ModelPatcher.calculate_weight = calculate_weight_adjust_channel(
 )
 
 # ------------ End patching ComfyUI ------------
+
+KNOWN_LAYER_DIFFUSION_VAE = {StableDiffusionVersion.SD1x: (HuggingFile(repo_id="LayerDiffusion/layerdiffusion-v1",
+                                                                       filename="layer_sd15_vae_transparent_decoder.safetensors"),),
+                             StableDiffusionVersion.SDXL: (HuggingFile(repo_id="LayerDiffusion/layerdiffusion-v1",
+                                                                       filename="vae_transparent_decoder.safetensors"),)}
 
 
 class LayeredDiffusionDecode:
@@ -141,17 +147,10 @@ class LayeredDiffusionDecode:
         context.
         """
         sd_version = StableDiffusionVersion(sd_version)
-        if sd_version == StableDiffusionVersion.SD1x:
-            url = "https://huggingface.co/LayerDiffusion/layerdiffusion-v1/resolve/main/layer_sd15_vae_transparent_decoder.safetensors"
-            file_name = "layer_sd15_vae_transparent_decoder.safetensors"
-        elif sd_version == StableDiffusionVersion.SDXL:
-            url = "https://huggingface.co/LayerDiffusion/layerdiffusion-v1/resolve/main/vae_transparent_decoder.safetensors"
-            file_name = "vae_transparent_decoder.safetensors"
+        file, = KNOWN_LAYER_DIFFUSION_VAE[sd_version]
+        model_path = get_or_download(FOLDER_PATH, file.filename, [file])
 
         if not self.vae_transparent_decoder.get(sd_version):
-            model_path = load_file_from_url(
-                url=url, model_dir=layer_model_root, file_name=file_name
-            )
             self.vae_transparent_decoder[sd_version] = TransparentVAEDecoder(
                 load_torch_file(model_path),
                 device=comfy.model_management.get_torch_device(),
@@ -161,6 +160,7 @@ class LayeredDiffusionDecode:
                     else torch.float32
                 ),
             )
+            # todo: implement model offloading using model management
         pixel = images.movedim(-1, 1)  # [B, H, W, C] => [B, C, H, W]
 
         # Decoder requires dimension to be 64-aligned.
@@ -172,8 +172,8 @@ class LayeredDiffusionDecode:
         for start_idx in range(0, samples["samples"].shape[0], sub_batch_size):
             decoded.append(
                 self.vae_transparent_decoder[sd_version].decode_pixel(
-                    pixel[start_idx : start_idx + sub_batch_size],
-                    samples["samples"][start_idx : start_idx + sub_batch_size],
+                    pixel[start_idx: start_idx + sub_batch_size],
+                    samples["samples"][start_idx: start_idx + sub_batch_size],
                 )
             )
         pixel_with_alpha = torch.cat(decoded, dim=0)
@@ -234,12 +234,12 @@ class LayeredDiffusionDecodeSplit(LayeredDiffusionDecodeRGBA):
     RETURN_TYPES = ("IMAGE",) * MAX_FRAMES
 
     def decode(
-        self,
-        samples,
-        images: torch.Tensor,
-        frames: int,
-        sd_version: str,
-        sub_batch_size: int,
+            self,
+            samples,
+            images: torch.Tensor,
+            frames: int,
+            sd_version: str,
+            sub_batch_size: int,
     ):
         sliced_samples = copy.copy(samples)
         sliced_samples["samples"] = sliced_samples["samples"][::frames]
@@ -270,8 +270,7 @@ class LayerType(Enum):
 
 @dataclass
 class LayeredDiffusionBase:
-    model_file_name: str
-    model_url: str
+    hugging_file: HuggingFile
     sd_version: StableDiffusionVersion
     attn_sharing: bool = False
     injection_method: Optional[LayerMethod] = None
@@ -313,16 +312,12 @@ class LayeredDiffusionBase:
         return (write_c_concat(cond), write_c_concat(uncond))
 
     def apply_layered_diffusion(
-        self,
-        model: ModelPatcher,
-        weight: float,
+            self,
+            model: ModelPatcher,
+            weight: float,
     ):
         """Patch model"""
-        model_path = load_file_from_url(
-            url=self.model_url,
-            model_dir=layer_model_root,
-            file_name=self.model_file_name,
-        )
+        model_path = get_or_download(FOLDER_PATH, self.hugging_file.filename, [self.hugging_file])
         layer_lora_state_dict = load_layer_model_state_dict(model_path)
         layer_lora_patch_dict = to_lora_patch_dict(layer_lora_state_dict)
         work_model = model.clone()
@@ -330,16 +325,12 @@ class LayeredDiffusionBase:
         return (work_model,)
 
     def apply_layered_diffusion_attn_sharing(
-        self,
-        model: ModelPatcher,
-        control_img: Optional[torch.TensorType] = None,
+            self,
+            model: ModelPatcher,
+            control_img: Optional[torch.TensorType] = None,
     ):
         """Patch model with attn sharing"""
-        model_path = load_file_from_url(
-            url=self.model_url,
-            model_dir=layer_model_root,
-            file_name=self.model_file_name,
-        )
+        model_path = get_or_download(FOLDER_PATH, self.hugging_file.filename, [self.hugging_file])
         layer_lora_state_dict = load_layer_model_state_dict(model_path)
         work_model = model.clone()
         patcher = AttentionSharingPatcher(
@@ -358,7 +349,7 @@ def get_model_sd_version(model: ModelPatcher) -> StableDiffusionVersion:
     if isinstance(model_config, comfy.supported_models.SDXL):
         return StableDiffusionVersion.SDXL
     elif isinstance(
-        model_config, (comfy.supported_models.SD15, comfy.supported_models.SD20)
+            model_config, (comfy.supported_models.SD15, comfy.supported_models.SD20)
     ):
         # SD15 and SD20 are compatible with each other.
         return StableDiffusionVersion.SD1x
@@ -387,20 +378,17 @@ class LayeredDiffusionFG:
     CATEGORY = "layer_diffuse"
     MODELS = (
         LayeredDiffusionBase(
-            model_file_name="layer_xl_transparent_attn.safetensors",
-            model_url="https://huggingface.co/LayerDiffusion/layerdiffusion-v1/resolve/main/layer_xl_transparent_attn.safetensors",
+            hugging_file=HuggingFile("LayerDiffusion/layerdiffusion-v1", "layer_xl_transparent_attn.safetensors"),
             sd_version=StableDiffusionVersion.SDXL,
             injection_method=LayerMethod.ATTN,
         ),
         LayeredDiffusionBase(
-            model_file_name="layer_xl_transparent_conv.safetensors",
-            model_url="https://huggingface.co/LayerDiffusion/layerdiffusion-v1/resolve/main/layer_xl_transparent_conv.safetensors",
+            hugging_file=HuggingFile("LayerDiffusion/layerdiffusion-v1", "layer_xl_transparent_conv.safetensors"),
             sd_version=StableDiffusionVersion.SDXL,
             injection_method=LayerMethod.CONV,
         ),
         LayeredDiffusionBase(
-            model_file_name="layer_sd15_transparent_attn.safetensors",
-            model_url="https://huggingface.co/LayerDiffusion/layerdiffusion-v1/resolve/main/layer_sd15_transparent_attn.safetensors",
+            hugging_file=HuggingFile("LayerDiffusion/layerdiffusion-v1", "layer_sd15_transparent_attn.safetensors"),
             sd_version=StableDiffusionVersion.SD1x,
             injection_method=LayerMethod.ATTN,
             attn_sharing=True,
@@ -408,10 +396,10 @@ class LayeredDiffusionFG:
     )
 
     def apply_layered_diffusion(
-        self,
-        model: ModelPatcher,
-        config: str,
-        weight: float,
+            self,
+            model: ModelPatcher,
+            config: str,
+            weight: float,
     ):
         ld_model = [m for m in self.MODELS if m.config_string == config][0]
         assert get_model_sd_version(model) == ld_model.sd_version
@@ -443,8 +431,7 @@ class LayeredDiffusionJoint:
     CATEGORY = "layer_diffuse"
     MODELS = (
         LayeredDiffusionBase(
-            model_file_name="layer_sd15_joint.safetensors",
-            model_url="https://huggingface.co/LayerDiffusion/layerdiffusion-v1/resolve/main/layer_sd15_joint.safetensors",
+            HuggingFile("LayerDiffusion/layerdiffusion-v1", "layer_sd15_joint.safetensors"),
             sd_version=StableDiffusionVersion.SD1x,
             attn_sharing=True,
             frames=3,
@@ -452,12 +439,12 @@ class LayeredDiffusionJoint:
     )
 
     def apply_layered_diffusion(
-        self,
-        model: ModelPatcher,
-        config: str,
-        fg_cond: Optional[List[List[torch.TensorType]]] = None,
-        bg_cond: Optional[List[List[torch.TensorType]]] = None,
-        blended_cond: Optional[List[List[torch.TensorType]]] = None,
+            self,
+            model: ModelPatcher,
+            config: str,
+            fg_cond: Optional[List[List[torch.TensorType]]] = None,
+            bg_cond: Optional[List[List[torch.TensorType]]] = None,
+            blended_cond: Optional[List[List[torch.TensorType]]] = None,
     ):
         ld_model = [m for m in self.MODELS if m.config_string == config][0]
         assert get_model_sd_version(model) == ld_model.sd_version
@@ -502,27 +489,25 @@ class LayeredDiffusionCond:
     CATEGORY = "layer_diffuse"
     MODELS = (
         LayeredDiffusionBase(
-            model_file_name="layer_xl_fg2ble.safetensors",
-            model_url="https://huggingface.co/LayerDiffusion/layerdiffusion-v1/resolve/main/layer_xl_fg2ble.safetensors",
+            hugging_file=HuggingFile("LayerDiffusion/layerdiffusion-v1", "layer_xl_fg2ble.safetensors"),
             sd_version=StableDiffusionVersion.SDXL,
             cond_type=LayerType.FG,
         ),
         LayeredDiffusionBase(
-            model_file_name="layer_xl_bg2ble.safetensors",
-            model_url="https://huggingface.co/LayerDiffusion/layerdiffusion-v1/resolve/main/layer_xl_bg2ble.safetensors",
+            hugging_file=HuggingFile("LayerDiffusion/layerdiffusion-v1", "layer_xl_bg2ble.safetensors"),
             sd_version=StableDiffusionVersion.SDXL,
             cond_type=LayerType.BG,
         ),
     )
 
     def apply_layered_diffusion(
-        self,
-        model: ModelPatcher,
-        cond,
-        uncond,
-        latent,
-        config: str,
-        weight: float,
+            self,
+            model: ModelPatcher,
+            cond,
+            uncond,
+            latent,
+            config: str,
+            weight: float,
     ):
         ld_model = [m for m in self.MODELS if m.config_string == config][0]
         assert get_model_sd_version(model) == ld_model.sd_version
@@ -557,16 +542,14 @@ class LayeredDiffusionCondJoint:
     CATEGORY = "layer_diffuse"
     MODELS = (
         LayeredDiffusionBase(
-            model_file_name="layer_sd15_fg2bg.safetensors",
-            model_url="https://huggingface.co/LayerDiffusion/layerdiffusion-v1/resolve/main/layer_sd15_fg2bg.safetensors",
+            hugging_file=HuggingFile("LayerDiffusion/layerdiffusion-v1", "layer_sd15_fg2bg.safetensors"),
             sd_version=StableDiffusionVersion.SD1x,
             attn_sharing=True,
             frames=2,
             cond_type=LayerType.FG,
         ),
         LayeredDiffusionBase(
-            model_file_name="layer_sd15_bg2fg.safetensors",
-            model_url="https://huggingface.co/LayerDiffusion/layerdiffusion-v1/resolve/main/layer_sd15_bg2fg.safetensors",
+            hugging_file=HuggingFile("LayerDiffusion/layerdiffusion-v1", "layer_sd15_bg2fg.safetensors"),
             sd_version=StableDiffusionVersion.SD1x,
             attn_sharing=True,
             frames=2,
@@ -575,12 +558,12 @@ class LayeredDiffusionCondJoint:
     )
 
     def apply_layered_diffusion(
-        self,
-        model: ModelPatcher,
-        image,
-        config: str,
-        cond: Optional[List[List[torch.TensorType]]] = None,
-        blended_cond: Optional[List[List[torch.TensorType]]] = None,
+            self,
+            model: ModelPatcher,
+            image,
+            config: str,
+            cond: Optional[List[List[torch.TensorType]]] = None,
+            blended_cond: Optional[List[List[torch.TensorType]]] = None,
     ):
         ld_model = [m for m in self.MODELS if m.config_string == config][0]
         assert get_model_sd_version(model) == ld_model.sd_version
@@ -627,28 +610,26 @@ class LayeredDiffusionDiff:
     CATEGORY = "layer_diffuse"
     MODELS = (
         LayeredDiffusionBase(
-            model_file_name="layer_xl_fgble2bg.safetensors",
-            model_url="https://huggingface.co/LayerDiffusion/layerdiffusion-v1/resolve/main/layer_xl_fgble2bg.safetensors",
+            hugging_file=HuggingFile("LayerDiffusion/layerdiffusion-v1", "layer_xl_fgble2bg.safetensors"),
             sd_version=StableDiffusionVersion.SDXL,
             cond_type=LayerType.FG,
         ),
         LayeredDiffusionBase(
-            model_file_name="layer_xl_bgble2fg.safetensors",
-            model_url="https://huggingface.co/LayerDiffusion/layerdiffusion-v1/resolve/main/layer_xl_bgble2fg.safetensors",
+            hugging_file=HuggingFile("LayerDiffusion/layerdiffusion-v1", "layer_xl_bgble2fg.safetensors"),
             sd_version=StableDiffusionVersion.SDXL,
             cond_type=LayerType.BG,
         ),
     )
 
     def apply_layered_diffusion(
-        self,
-        model: ModelPatcher,
-        cond,
-        uncond,
-        blended_latent,
-        latent,
-        config: str,
-        weight: float,
+            self,
+            model: ModelPatcher,
+            cond,
+            uncond,
+            blended_latent,
+            latent,
+            config: str,
+            weight: float,
     ):
         ld_model = [m for m in self.MODELS if m.config_string == config][0]
         assert get_model_sd_version(model) == ld_model.sd_version
