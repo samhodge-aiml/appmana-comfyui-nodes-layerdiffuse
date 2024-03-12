@@ -12,7 +12,8 @@ import comfy.model_management
 import comfy.model_base
 import comfy.supported_models
 import comfy.supported_models_base
-from comfy.model_downloader import HuggingFile, get_or_download
+from comfy.model_downloader import get_or_download
+from comfy.model_downloader_types import HuggingFile
 from comfy.model_patcher import ModelPatcher
 from comfy.cmd.folder_paths import get_folder_paths
 from comfy.utils import load_torch_file
@@ -25,10 +26,7 @@ from .lib_layerdiffusion.enums import StableDiffusionVersion
 
 FOLDER_PATH = "layer_model"
 
-if "layer_model" in folder_paths.folder_names_and_paths:
-    layer_model_root = get_folder_paths("layer_model")[0]
-else:
-    layer_model_root = os.path.join(folder_paths.models_dir, "layer_model")
+folder_paths.add_model_folder_path(FOLDER_PATH)
 load_layer_model_state_dict = load_torch_file
 
 
