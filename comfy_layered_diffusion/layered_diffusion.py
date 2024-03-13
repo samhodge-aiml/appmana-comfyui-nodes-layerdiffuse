@@ -1,6 +1,7 @@
 import os
 from enum import Enum
 import torch
+import torch.nn.functional as F
 import functools
 import copy
 from typing import Optional, List
@@ -12,9 +13,10 @@ import comfy.model_management
 import comfy.model_base
 import comfy.supported_models
 import comfy.supported_models_base
-from comfy.model_downloader import get_or_download, KNOWN_CHECKPOINTS
+from comfy.model_downloader import get_or_download, add_known_models, KNOWN_CHECKPOINTS
 from comfy.model_downloader_types import HuggingFile, CivitFile
 from comfy.model_patcher import ModelPatcher
+from comfy.nodes.common import MAX_RESOLUTION
 from comfy.utils import load_torch_file
 from comfy_extras.nodes.nodes_compositing import JoinImageWithAlpha
 from comfy.conds import CONDRegular
@@ -28,10 +30,17 @@ FOLDER_PATH = "layer_model"
 folder_paths.add_model_folder_path(FOLDER_PATH)
 load_layer_model_state_dict = load_torch_file
 
-
 # ------------ Start patching ComfyUI ------------
 # this references checkpoints for its example workflows that should be added here
-KNOWN_CHECKPOINTS.append(CivitFile(133005, 357609, filename="juggernautXL_v8Rundiffusion.safetensors"))
+add_known_models("checkpoints", KNOWN_CHECKPOINTS,
+                 # from the community examples
+                 CivitFile(133005, 357609, filename="juggernautXL_v8Rundiffusion.safetensors"),
+                 HuggingFile(repo_id="ckpt/realistic-vision-v20", filename="realisticVisionV20_v20.safetensors"),
+                 # from the paper
+                 CivitFile(133005, 198530, filename="juggernautXL_version6Rundiffusion.safetensors"),
+                 CivitFile(261336, 295158, filename="animaPencilXL_v100.safetensors"),
+                 )
+
 
 def calculate_weight_adjust_channel(func):
     """Patches ComfyUI's LoRA weight application to accept multi-channel inputs."""
@@ -641,6 +650,70 @@ class LayeredDiffusionDiff:
         ) + ld_model.apply_c_concat(cond, uncond, c_concat)
 
 
+class ImageResize:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "width": ("INT", {"default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 8, }),
+                "height": ("INT", {"default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 8, }),
+                "interpolation": (["nearest", "bilinear", "bicubic", "area", "nearest-exact", "lanczos"],),
+                "keep_proportion": ("BOOLEAN", {"default": False}),
+                "condition": (["always", "downscale if bigger", "upscale if smaller"],),
+                "multiple_of": ("INT", {"default": 0, "min": 0, "max": 512, "step": 1, }),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "INT", "INT",)
+    RETURN_NAMES = ("IMAGE", "width", "height",)
+    FUNCTION = "execute"
+    CATEGORY = "essentials"
+
+    def execute(self, image, width, height, keep_proportion, interpolation="nearest", condition="always",
+                multiple_of=0):
+        _, oh, ow, _ = image.shape
+
+        if keep_proportion is True:
+            if width == 0 and oh < height:
+                width = MAX_RESOLUTION
+            elif width == 0 and oh >= height:
+                width = ow
+
+            if height == 0 and ow < width:
+                height = MAX_RESOLUTION
+            elif height == 0 and ow >= width:
+                height = ow
+
+            # width = ow if width == 0 else width
+            # height = oh if height == 0 else height
+            ratio = min(width / ow, height / oh)
+            width = round(ow * ratio)
+            height = round(oh * ratio)
+        else:
+            if width == 0:
+                width = ow
+            if height == 0:
+                height = oh
+
+        if multiple_of > 1:
+            width = width - (width % multiple_of)
+            height = height - (height % multiple_of)
+
+        outputs = image.permute([0, 3, 1, 2])
+
+        if "always" in condition or ("bigger" in condition and (oh > height or ow > width)) or (
+                "smaller" in condition and (oh < height or ow < width)):
+            if interpolation == "lanczos":
+                outputs = comfy.utils.lanczos(outputs, width, height)
+            else:
+                outputs = F.interpolate(outputs, size=(height, width), mode=interpolation)
+
+        outputs = outputs.permute([0, 2, 3, 1])
+
+        return (outputs, outputs.shape[2], outputs.shape[1],)
+
+
 NODE_CLASS_MAPPINGS = {
     "LayeredDiffusionApply": LayeredDiffusionFG,
     "LayeredDiffusionJointApply": LayeredDiffusionJoint,
@@ -650,6 +723,7 @@ NODE_CLASS_MAPPINGS = {
     "LayeredDiffusionDecode": LayeredDiffusionDecode,
     "LayeredDiffusionDecodeRGBA": LayeredDiffusionDecodeRGBA,
     "LayeredDiffusionDecodeSplit": LayeredDiffusionDecodeSplit,
+    "ImageResize+": ImageResize,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -661,4 +735,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LayeredDiffusionDecode": "Layer Diffuse Decode",
     "LayeredDiffusionDecodeRGBA": "Layer Diffuse Decode (RGBA)",
     "LayeredDiffusionDecodeSplit": "Layer Diffuse Decode (Split)",
+    "ImageResize+": "ImageResize+",
 }
