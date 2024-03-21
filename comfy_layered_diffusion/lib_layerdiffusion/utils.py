@@ -1,10 +1,8 @@
-import numpy as np
-from .enums import ResizeMode
 import cv2
+import numpy as np
 import torch
-import os
-from urllib.parse import urlparse
-from typing import Optional
+
+from .enums import ResizeMode
 
 
 def rgba2rgbfp32(x):
