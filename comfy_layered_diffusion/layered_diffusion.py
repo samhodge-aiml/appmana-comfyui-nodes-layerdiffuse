@@ -1,29 +1,29 @@
-import os
+import copy
+import functools
+from dataclasses import dataclass
 from enum import Enum
+from typing import Optional, List
+
 import torch
 import torch.nn.functional as F
-import functools
-import copy
-from typing import Optional, List
-from dataclasses import dataclass
 
-from comfy import model_management
-from comfy.cmd import folder_paths
-import comfy.model_management
 import comfy.model_base
+import comfy.model_management
 import comfy.supported_models
 import comfy.supported_models_base
+from comfy import model_management
+from comfy.cmd import folder_paths
+from comfy.conds import CONDRegular
 from comfy.model_downloader import get_or_download, add_known_models, KNOWN_CHECKPOINTS
 from comfy.model_downloader_types import HuggingFile, CivitFile
 from comfy.model_patcher import ModelPatcher
 from comfy.nodes.common import MAX_RESOLUTION
 from comfy.utils import load_torch_file
 from comfy_extras.nodes.nodes_compositing import JoinImageWithAlpha
-from comfy.conds import CONDRegular
-from .lib_layerdiffusion.utils import to_lora_patch_dict
-from .lib_layerdiffusion.models import TransparentVAEDecoder
 from .lib_layerdiffusion.attention_sharing import AttentionSharingPatcher
 from .lib_layerdiffusion.enums import StableDiffusionVersion
+from .lib_layerdiffusion.models import TransparentVAEDecoder
+from .lib_layerdiffusion.utils import to_lora_patch_dict
 
 FOLDER_PATH = "layer_model"
 
