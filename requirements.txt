@@ -1,3 +1,2 @@
-comfyui
 diffusers>=0.25.0
 opencv-python-headless>=4.9.0.80
