@@ -1,3 +1,18 @@
+[project]
+name = "comfy_layered_diffusion"
+version = "0.0.1"
+description = ""
+dynamic = ["dependencies"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[project.entry-points."comfyui.custom_nodes"]
+comfy_layered_diffusion = "comfy_layered_diffusion"
+
 [build-system]
 requires = ["setuptools", "wheel", "pip"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
