@@ -1,7 +1,5 @@
 [project]
 name = "comfyui-layerdiffuse"
-version = "0.0.1"
-name = "comfyui-layerdiffuse"
 description = "Transparent Image Layer Diffusion using Latent Transparency"
 version = "1.0.4"
 dynamic = ["dependencies"]
