@@ -1,7 +1,9 @@
 [project]
-name = "comfy_layered_diffusion"
+name = "comfyui-layerdiffuse"
 version = "0.0.1"
-description = ""
+name = "comfyui-layerdiffuse"
+description = "Transparent Image Layer Diffusion using Latent Transparency"
+version = "1.0.4"
 dynamic = ["dependencies"]
 
 [tool.setuptools.packages.find]
@@ -16,3 +18,12 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
+
+[project.urls]
+Repository = "https://github.com/huchenlei/ComfyUI-layerdiffuse"
+
+# Used by Comfy Registry https://comfyregistry.org
+[tool.comfy]
+PublisherId = "huchenlei"
+DisplayName = "ComfyUI-layerdiffuse"
+Icon = ""
